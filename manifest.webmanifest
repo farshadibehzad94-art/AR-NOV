@@ -1,0 +1,25 @@
+{
+  "name": "AR Navigate – Byggnadsnavigering",
+  "short_name": "AR Navigate",
+  "lang": "sv",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f5f6f2",
+  "theme_color": "#6f7f3f",
+  "description": "Inomhusnavigering med planritning, punkter och AR.",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "scope": "./"
+}
