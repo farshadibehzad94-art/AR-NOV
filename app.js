@@ -226,8 +226,6 @@ function renderDetail() {
   renderFloorPlan();
 
   if (isEditor) {
-    ensureScaleUI();
-    updateScaleUI();
     renderWpList();
   } else {
     populateNavSelects();
@@ -461,7 +459,7 @@ async function calculateRoute() {
 
   const path = findPath(fromId, toId);
   if (!path) {
-    toast('Ingen rutt hittades mellan dessa punkter');
+    toast('Ingen rutt hittades. Välj Verktyg → Koppla och tryck på punkterna i den ordning man ska gå. Ingen avståndsmätning behövs.');
     state.route = null;
     renderFloorPlan();
     return;
@@ -481,9 +479,8 @@ async function calculateRoute() {
   }
 
   $('#statPoints').textContent = path.length + 1;
-  const scale = currentFloor()?.scaleMetersPerUnit || 1;
-  const totalMeters = totalDist * scale;
-  $('#statDistance').textContent = totalMeters >= 1 ? (Math.round(totalMeters*10)/10) + ' m' : Math.round(totalDist) + ' ritn.enheter';
+  const scale = currentFloor()?.scaleMetersPerUnit;
+  $('#statDistance').textContent = scale ? (Math.round(totalDist * scale * 10) / 10) + ' m' : Math.round(totalDist) + ' ritningsenheter';
   $('#statFloors').textContent = floors.size;
 
   // Steps
@@ -519,10 +516,9 @@ function setEditorTool(tool) {
 
   const hints = {
     add: 'Klicka på planritningen för att placera en ny punkt.',
-    connect: 'Klicka på två punkter för att koppla dem med en linje.',
+    connect: 'Klicka på punkterna i den ordning man ska gå. Varje klick kopplar till föregående punkt – inga avstånd behövs.',
     move: 'Drag en punkt för att flytta den.',
     delete: 'Klicka på en punkt eller linje för att ta bort den.',
-    calibrate: 'Klicka på två punkter i planritningen och ange verkligt avstånd i meter.',
   };
   $('#editorHint').textContent = hints[tool] || '';
   renderFloorPlan();
@@ -545,19 +541,6 @@ function handleSvgClick(e) {
 
   const wpEl = e.target.closest('[data-wp]');
   const edgeEl = e.target.closest('[data-edge]');
-
-  if (state.editorTool === 'calibrate') {
-    const coords = wpEl ? (()=>{ const wp=floor.waypoints.find(w=>w.id===wpEl.dataset.wp); return wp ? {x:wp.x,y:wp.y} : null; })() : svgCoords(e.clientX,e.clientY);
-    if (!coords) return;
-    state.calibrationPoints = state.calibrationPoints || [];
-    state.calibrationPoints.push(coords);
-    if(state.calibrationPoints.length===1){ toast('Punkt A vald – välj punkt B'); renderFloorPlan(); return; }
-    const [a,b]=state.calibrationPoints; const units=Math.hypot(b.x-a.x,b.y-a.y);
-    const meters=Number(prompt('Hur många meter är det mellan punkt A och B?', '10'));
-    if(!Number.isFinite(meters)||meters<=0||units<1){ state.calibrationPoints=[]; toast('Kalibreringen avbröts'); return; }
-    floor.scaleMetersPerUnit=meters/units; floor.scaleCalibration={a,b,meters}; state.calibrationPoints=[];
-    toast(`Skala sparad: ${meters.toFixed(2)} m`); renderDetail(); return;
-  }
 
   if (state.editorTool === 'add') {
     if (wpEl) return; // Don't add on existing waypoint
@@ -599,13 +582,17 @@ function handleSvgClick(e) {
       );
       if (!exists) {
         floor.edges.push([state.selectedWp, wpId]);
-        toast('Punkter kopplade');
+        toast('Punkter kopplade – tryck på nästa punkt');
       } else {
-        toast('Punkterna är redan kopplade');
+        toast('Punkterna är redan kopplade – tryck på nästa punkt');
       }
-      state.selectedWp = null;
+      // Keep the second point selected so the user can continue the route
+      // by tapping the next waypoint. No distance or measurement is needed.
+      state.selectedWp = wpId;
       renderFloorPlan();
       renderWpList();
+      const g = $(`[data-wp="${wpId}"]`);
+      if (g) g.querySelector('circle')?.classList.add('fp-waypoint-selected');
     }
   } else if (state.editorTool === 'delete') {
     if (wpEl) {
@@ -727,8 +714,6 @@ async function saveFloor() {
       edges: floor.edges,
       background: floor.background,
       name: floor.name,
-      scaleMetersPerUnit: floor.scaleMetersPerUnit || null,
-      scaleCalibration: floor.scaleCalibration || null,
     });
     toast('Planritning sparad');
   } catch (e) {
@@ -820,15 +805,6 @@ const AR_OLIVE = '#6f7f3f';
 const AR_OLIVE_DARK = '#4f5e2a';
 const AR_WHITE = 'rgba(255,255,255,.94)';
 
-function ensureScaleUI(){
-  const panel=$('#editorPanel'); if(!panel || $('#scaleTools')) return;
-  const box=document.createElement('div'); box.id='scaleTools'; box.style.cssText='margin:12px 0;padding:12px;border:1px solid var(--color-border);border-radius:12px;background:var(--color-surface-2,#f8f8f5)';
-  box.innerHTML='<div style="font-weight:700;margin-bottom:6px">Planritningens skala</div><div id="scaleStatus" style="font-size:13px;margin-bottom:8px"></div><button class="btn btn-outline" id="btnCalibrateScale">Kalibrera skala</button>';
-  panel.prepend(box); $('#btnCalibrateScale').onclick=()=>{ state.editorTool='calibrate'; state.calibrationPoints=[]; $$('.tool-btn').forEach(b=>b.classList.remove('active')); $('#editorHint').textContent='Klicka på två punkter och ange avståndet i meter.'; toast('Välj punkt A och sedan punkt B'); };
-  updateScaleUI();
-}
-function updateScaleUI(){ const floor=currentFloor(), elx=$('#scaleStatus'); if(!elx||!floor)return; elx.textContent=floor.scaleMetersPerUnit?`Kalibrerad: ${floor.scaleMetersPerUnit.toFixed(4)} m per ritningsenhet`:'Inte kalibrerad ännu – du kan ändå redigera planen.'; }
-
 function ensureEnhancedNavUI() {
   const navPanel = $('#navPanel');
   if (!navPanel || $('#advancedNavControls')) return;
@@ -838,7 +814,7 @@ function ensureEnhancedNavUI() {
   navPanel.querySelector('.nav-controls-row')?.after(box);
   $('#routeSearch').addEventListener('input',()=>{const q=$('#routeSearch').value.trim().toLowerCase();if(!q)return;const m=[];for(const f of state.currentBuilding?.floors||[])for(const w of f.waypoints||[])if((w.label||'').toLowerCase().includes(q))m.push(w);if(m.length===1){$('#selectTo').value=m[0].id;state.routeToId=m[0].id;}});
 }
-function routeWeight(step){const pref=$('#routePreference')?.value||'fast';if(!step.isStairs)return 1;const wp=getWp(step.wpId);if(pref==='accessible')return wp?.type==='elevator'?1.2:1000;if(pref==='elevator')return wp?.type==='elevator'?0.7:3;if(pref==='stairs')return wp?.type==='stairs'?.7:1.5;return 1.8;}
+function routeWeight(step){const pref=$('#routePreference')?.value||'fast';if(!step.isStairs)return 1;const wp=getWp(step.wpId);if(pref==='accessible')return wp?.type==='elevator'?1.2:1000;if(pref==='elevator')return wp?.type==='elevator'?0.7:3;if(pref==='stairs')return wp?.type==='stairs'?0.7:1.5;return 1.8;}
 
 // Weighted shortest-path search. Existing floor links and stair/elevator links are preserved.
 function findPath(fromId,toId){
@@ -1038,7 +1014,6 @@ function escapeHtml(s) {
 document.addEventListener('DOMContentLoaded', () => {
   ensureEnhancedNavUI();
   addProjectTools();
-  ensureScaleUI();
   // Building list
   $('#btnAddBuilding').addEventListener('click', openAddModal);
 
